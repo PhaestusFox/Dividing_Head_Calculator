@@ -35,7 +35,7 @@ fn main() {
         'p' => change_page_size(&input, &mut settings),
         '?' => help(),
         '0' | '1' | '2' | '3'| '4'| '5'| '6'| '7'| '8'| '9' => {match input.trim().parse() {
-            Ok(val) => find(val, &settings),
+            Ok(val) => search(val, &settings),
             Err(_) => {println!("{} is not a number",input); continue;}
         };},
         _ => println!("Enter Num or a VALID Com Char"),
@@ -153,7 +153,7 @@ fn change_acc(input: &str, settings: &mut Settings) {
         match word.chars().next().unwrap() {
             '0' | '1' | '2' | '3'| '4'| '5'| '6'| '7'| '8'| '9' => {match word.parse() {
                 Ok(val) => {
-                    let val : f32 = val;
+                    let val : f64 = val;
                     settings.acc = val.abs();
                     println!("Set Accuracy to {}",settings.acc);
                     save_settings(&settings);
@@ -195,13 +195,13 @@ fn update_r(input: &str, settings: &mut Settings) {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Settings{
-    r : u32,
-    plates : Vec<Vec<u32>>,
+    r : usize,
+    plates : Vec<Vec<usize>>,
     first : bool,
-    acc : f32,
-    min : u8,
-    max : u8,
-    page_size : u8,
+    acc : f64,
+    min : usize,
+    max : usize,
+    page_size : usize,
 }
 
 impl Settings {
@@ -218,153 +218,53 @@ impl Settings {
     }
 }
 
-fn find(divisions : u32, settings : &Settings){
-    let mut found_list :Vec<PrintData> = Vec::new();
-    if settings.r as f32 / divisions as f32 % 1.0 == 0.0{
+fn search(divisions : usize, settings : &Settings){
+    let mut finds : Vec<PrintData> = Vec::new();
+    if let Some(find) = find_without_plate(divisions, settings.r){ //looks to see if you can find a solution without using a plate
         println!("Found Exact matches");
-        println!("┌─────┬────────────────────┬─────┬───────────┬──────────┐");
-        PrintData{
-            target : divisions,
-            pnod : divisions as f32,
-            laps : 1,
-            movement : (settings.r / divisions).to_string(),
-        }.print();
-        println!("└─────┴────────────────────┴─────┴───────────┴──────────┘");
+        println!("┌{0:─<5}┬{0:─<20}┬{0:─<5}┬{0:─<20}┬{0:─<20}┐","");
+        find.print();
+        println!("└{0:─<5}┴{0:─<20}┴{0:─<5}┴{0:─<20}┴{0:─<20}┘","");
         return;
     }
-    for x in settings.min..settings.max{
-        if !no_loops_onx(divisions, x as u32){
+
+    for x in settings.min..settings.max{//search eatch x work lap computation
+        if x != 1 && !no_loops_onx(divisions, x){//if x will result in an infinit loop
             continue;
         }
-        for plate in settings.plates.iter(){
-            for &hole_count in plate{
-                let steps = settings.r as f32 / divisions as f32;
-                let steps = steps * x as f32;
-                let full = (steps - (1.0 / hole_count as f32) * x as f32).floor();
-                let holes = (steps - full as f32) * hole_count as f32;
-                let find = PrintData{
-                    target : divisions,
-                    pnod : settings.r as f32 / (full as f32 + (holes.floor() / hole_count as f32)) * x as f32,
-                    laps : x,
-                    movement : format!("{} & {}/{}", full, holes as u32, hole_count),
-                };
-                let exc = find.error() == 0.0;
-                if find.error() < settings.acc {
-                    found_list.push(find);
+        if x > divisions/2{//break if xis more the half the divisions for this is just a mirror of the fist half
+            break;
+        }
+        for plate in settings.plates.iter(){//check eatch plate for solution
+            for &hole in plate {
+                if let Some(find) = find_single_hole(divisions, settings.r, hole, x, settings.acc){
+                    finds.push(find);
                 }
-                if exc {continue;}
-                for &sec_hole_count in plate{
-                    if sec_hole_count == hole_count {
-                        continue;
+                for &sec_hole in plate{
+                    if let Some(find) = find_dubble_hole_forward(divisions, settings.r, hole, sec_hole, x, settings.acc){
+                        finds.push(find);
                     }
-                    let mut small_holes = holes;
-                    let big_holes = small_holes.floor();
-                    small_holes -= big_holes;
-                    let small_holes = small_holes / hole_count as f32;
-                    let dif = (1.0 / hole_count as f32) - (1.0 / sec_hole_count as f32);
-                    let mut moves = 0.0;
-                    let mut target = 0.0;
-                    for _ in 0..hole_count{
-                        let test = settings.r as f32 / (full as f32 + ((big_holes - moves) / hole_count as f32) + (((((dif * moves)+small_holes)/(1.0/sec_hole_count as f32)) + moves).round() / sec_hole_count as f32)) * x as f32;
-                        target = (test - divisions as f32).abs();
-                        if target <= settings.acc {
-                            break;
-                        }
-                        moves += 1.0;
-                    }
-                    let sec_holes = ((dif * moves) + small_holes).round() / (1.0 / sec_hole_count as f32);
-                    {
-                        let mut big_holes = big_holes - moves;
-                        let mut full = full + (big_holes/hole_count as f32).floor();
-                        while big_holes < 0.0 {
-                            big_holes += hole_count as f32;
-                            full -= 1.0;
-                        }
-                        let mut sec_holes = sec_holes + moves;
-                        while sec_holes >= sec_hole_count as f32 {
-                            sec_holes -= sec_hole_count as f32;
-                            full += 1.0;
-                        }
-                        //println!("sec_holes = {}, moves = {}", small_holes, moves);
-                        let find = PrintData{
-                            target : divisions,
-                            pnod : settings.r as f32 / (full + (big_holes/hole_count as f32) + (sec_holes / sec_hole_count as f32)) * x as f32,
-                            laps : x,
-                            movement : format!("{} & {}/{} + {}/{}", full, big_holes as u32, hole_count, sec_holes, sec_hole_count),
-                        };
-                        //println!("{:#?} and error = {}",find, find.error());
-                        if find.error() <= settings.acc {
-                            //println!("pushing {:#?}", find);
-                            found_list.push(find);
-                        }
-                    }
-                    moves = 0.0;
-                    let mut small_holes = holes;
-                    let big_holes = holes.floor();
-                    small_holes -= big_holes;
-                    small_holes /= hole_count as f32;
-                    //full = (steps - (1.0 / hole_count as f32) * i as f32).floor();
-                    for _ in  0..hole_count{
-                        let test = settings.r as f32 / (full as f32 + (((big_holes + moves) / hole_count as f32) - (((-(small_holes - (dif * moves))/(1.0/sec_hole_count as f32)) + moves).round() / sec_hole_count as f32))) * x as f32;
-                            if false {
-                                let a = big_holes + moves;
-                                let c = dif * moves;
-                                let d = 1.0/sec_hole_count as f32;
-                                let e = small_holes - c;
-                                let f = -e/d;
-                                let g =(f + moves).round();
-                                println!("test'{test}' = settings.r as f32 / (full as f32 + (((big_holes + moves) / hole_count as f32) - (((-(small_holes - (dif * moves))/(1.0/sec_hole_count as f32)) + moves).round() / sec_hole_count as f32))) * x as f32", test = settings.r as f32 / (full as f32 + (((big_holes + moves) / hole_count as f32) - (((-(small_holes - (dif * moves))/(1.0/sec_hole_count as f32)) + moves).round() / sec_hole_count as f32))) * x as f32);
-                                println!("test'{test}' = {r} / ({full} + (({a} / {hole_count}) - ({g} / {sec_hole_count}))) * {x}",a = a, hole_count=hole_count,g= g,x = x,test=test,r = settings.r,full = full, sec_hole_count = sec_hole_count);
-                            }
-                        target = (test-divisions as f32).abs();
-                        if target <= settings.acc {
-                            //println!("found target {}",target);
-                            break;
-                        }
-                        moves += 1.0;
-                    }
-                    if target <= settings.acc
-                    {
-                        let mut sec_holes =((-(small_holes - (dif * moves))/(1.0/sec_hole_count as f32)) + moves).round();
-                        let mut big_holes = big_holes + moves;
-                        let mut full = full;
-                        //sec_holes += moves;
-                        //println!("target {} = {} & {}/{} - {}/{} * {}",target, full, big_holes, hole_count, sec_holes, sec_hole_count, x);
-                        while big_holes >= hole_count as f32 {
-                            big_holes -= hole_count as f32;
-                            full+=1.0;
-                        }
-                        while sec_holes > sec_hole_count as f32 {
-                            sec_holes -= sec_hole_count as f32;
-                            full -= 1.0;
-                        }
-                        //println!("target {} = {} & {}/{} - {}/{}",target, full, big_holes, hole_count, sec_holes, sec_hole_count);
-                        let find = PrintData{
-                            target : divisions,
-                            pnod : settings.r as f32 / (full + (big_holes/hole_count as f32) - (sec_holes / sec_hole_count as f32)) * x as f32,
-                            laps : x,
-                            movement : format!("{} & {}/{} - {}/{}", full, big_holes as u32, hole_count, sec_holes, sec_hole_count),
-                        };
-                        if find.error() <= settings.acc {
-                            found_list.push(find);
-                        }
+                    if let Some(find) = find_dubble_hole_backward(divisions, settings.r, hole, sec_hole, x, settings.acc){
+                        finds.push(find);
                     }
                 }
             }
         }
+
     }
 
-    if found_list.len() < 1{
+    let find_count = finds.len();
+    if find_count < 1{
         println!("No Matches found for setting : {:#?}", settings);
-        println!("Note: try lowering the accuracy or raising max work laps");
+        println!("Note: try lowering the accuracy or expanding work laps");
         return;
     }
-    println!("Found {} possible matches", found_list.len());
-    println!("┌─────┬────────────────────┬─────┬───────────┬──────────┐");
-    for (i,found) in PrintData::sort(found_list).iter().enumerate(){
-        if i > settings.page_size as usize {
-            println!("└─────┴────────────────────┴─────┴───────────┴──────────┘");
-            println!("Stopped at Page Limit - Found More;\nUse 'p' to change page size and see them");
+    println!("Found {} possible matches", find_count);
+    println!("┌{0:─<5}┬{0:─<20}┬{0:─<5}┬{0:─<20}┬{0:─<20}┐","");
+    for (i,found) in PrintData::sort(finds).iter().enumerate(){
+        if i > settings.page_size {
+            println!("└{0:─<5}┴{0:─<20}┴{0:─<5}┴{0:─<20}┴{0:─<20}┘","");
+            println!("Stopped at Page Limit - Found {} More;\nUse 'p' to change page size and see them", find_count - settings.page_size);
             return;
         }
         found.print();
@@ -372,7 +272,116 @@ fn find(divisions : u32, settings : &Settings){
             break;
         }
     }
-    println!("└─────┴────────────────────┴─────┴───────────┴──────────┘");
+    println!("└{0:─<5}┴{0:─<20}┴{0:─<5}┴{0:─<20}┴{0:─<20}┘","");
+    
+}
+
+
+
+fn find_without_plate(divisions : usize, ratio : usize) -> Option<PrintData>{
+    if ratio as f64 / divisions as f64 % 1.0 == 0.0{
+        return Some(
+            PrintData{
+                target : divisions,
+                pnod : divisions as f64,
+                laps : 1,
+                movement : (ratio / divisions).to_string(),
+                complexity : 0,
+            }
+        );
+    }
+    None
+}
+
+fn find_single_hole(divisions : usize, ratio : usize, hole_count : usize, x : usize, acc : f64) -> Option<PrintData>{
+    let step = ratio as f64 / divisions as f64 * x as f64;
+    let mut full = (step - (1.0 / hole_count as f64) * x as f64).floor();
+    let mut holes = (step - full) * hole_count as f64;
+    if holes > hole_count as f64{
+        full += 1.0;
+        holes -= hole_count as f64;
+    }
+    let find = PrintData{
+        target : divisions,
+        pnod : ratio as f64 / (full + (holes.round() / hole_count as f64)) * x as f64,
+        laps : x,
+        movement : if full == 0.0 {format!("{}/{}", holes.round(), hole_count)}else {format!("{} & {}/{}", full, holes.round(), hole_count)},
+        complexity : x,
+    };
+    if find.error() <= acc {
+        return Some(find);
+    }
+    None
+}
+
+fn find_dubble_hole_forward(divisions : usize, ratio : usize, hole_count : usize,sec_hole_count : usize, x : usize, acc : f64) -> Option<PrintData>{
+    if hole_count == sec_hole_count { //skip if holes are the same hole
+        return None;
+    }
+    //do not trust any of this implicity but it works
+    let step = ratio as f64 / divisions as f64 * x as f64;
+    let mut full = (step - (1.0 / hole_count as f64) * x as f64).floor();
+    let big_step = step - full;
+    let big_holes = (big_step * hole_count as f64).floor(); //floor to make shure we allways need to go forward with the seconed hole
+    let small_step = big_step - big_holes * (1.0 / hole_count as f64);//is the remander needed to be made up by the seconed hole
+    
+    for i in 0..hole_count{
+        let i = i as f64;
+        let small_holes = ((small_step  + i * (1.0 / hole_count as f64))* sec_hole_count as f64).round(); //caculate small holes by taking small step and adding i bigholes to it
+        let test = ratio as f64 / (full + ((big_holes - i) / hole_count as f64) + (small_holes / sec_hole_count as f64)) * x as f64;
+        if (test - divisions as f64).abs() <= acc{
+            if small_holes == 0.0 || small_holes == sec_hole_count as f64{return  None;}//return if the small_holes is 0 or a full rotation; is the same as just using hole
+            if big_holes - i == 0.0 || big_holes - i == hole_count as f64{return  None;} //return if the new bigholes is 0; is the same as just useing sec_hole
+            let first_holes = if big_holes - i < 0.0{
+                full -= 1.0;
+                big_holes - i + hole_count as f64
+            }else {big_holes - i};
+            let find = PrintData{
+                target : divisions as usize,
+                pnod : test,
+                laps : x,
+                movement : if full == 0.0 {format!("{}/{} + {}/{}", first_holes, hole_count, small_holes, sec_hole_count)}else {format!("{} & {}/{} + {}/{}", full, first_holes, hole_count, small_holes, sec_hole_count)},
+                complexity : 2 * x,
+            };
+            return Some(find);
+        }
+    }
+    None
+}
+
+fn find_dubble_hole_backward(divisions : usize, ratio : usize, hole_count : usize,sec_hole_count : usize, x : usize, acc : f64) -> Option<PrintData>{
+    if hole_count == sec_hole_count { //skip if holes are the same hole
+        return None;
+    }
+    //do not trust any of this
+    let step = ratio as f64 / divisions as f64 * x as f64;
+    let mut full = (step - (1.0 / hole_count as f64) * x as f64).floor();
+    let big_step = step - full;
+    let big_holes = (big_step * hole_count as f64).ceil(); //ceil to make shure we allways need to go back with the seconed hole
+    let small_step = big_step - big_holes * (1.0 / hole_count as f64);//is the remander needed to be made up by the seconed hole
+    
+    for i in 0..hole_count{
+        let i = i as f64;
+        let small_holes = ((-small_step  + i * (1.0 / hole_count as f64)) * sec_hole_count as f64).round(); //caculate small holes by taking small step and adding i bigholes to it
+        let test = ratio as f64 / (full + ((big_holes + i) / hole_count as f64) - (small_holes / sec_hole_count as f64)) * x as f64;
+        if (test - divisions as f64).abs() <= acc{
+            if small_holes == 0.0 || small_holes == sec_hole_count as f64{return  None;}//return if the small_holes is 0 or a full rotation; is the same as just using hole
+            let first_holes = if big_holes + i > hole_count as f64{
+                full += 1.0;
+                big_holes + i - hole_count as f64
+            }else {big_holes + i};
+            if first_holes == 0.0 || first_holes == hole_count as f64{return  None;} //return if the new bigholes is 0 or is a full rotation; is the same as just useing sec_hole
+            let find = PrintData{
+                target : divisions as usize,
+                pnod : test,
+                laps : x,
+                movement : if full == 0.0 {format!("{}/{} - {}/{}", first_holes, hole_count, small_holes, sec_hole_count)}else {format!("{} & {}/{} - {}/{}", full, first_holes, hole_count, small_holes, sec_hole_count)},
+                complexity : 2 * x,
+            };
+            return Some(find);
+        }
+    }
+    None
 }
 
 fn first_time_load(settings : &mut Settings){
@@ -391,9 +400,9 @@ fn first_time_load(settings : &mut Settings){
         input.clear();
         io::stdin().read_line(&mut input).expect("Failed To Get Input");
         let platet = input.trim().split(' ');
-        let mut holes: Vec<u32> = Vec::new();
+        let mut holes = Vec::new();
         for hole in platet{
-            let hole: u32 = match hole.trim().parse() {
+            let hole: usize = match hole.trim().parse() {
                 Ok(val) => val,
                 Err(_) => {println!("{} is not a number", hole);continue;}
             };
@@ -408,17 +417,18 @@ fn first_time_load(settings : &mut Settings){
 #[derive(Debug)]
 struct PrintData
     {
-        target : u32,
+        target : usize,
         movement : String,
-        laps : u8,
-        pnod : f32
+        laps : usize,
+        pnod : f64,
+        complexity : usize
     }
     impl PrintData {
         fn print(&self){
             if self.error() == 0.0 {
-                println!("│{:05}│{:^20}│{:^5}│{:^11}│{:^10}│",self.target, self.movement, self. laps, self.pnod, "Ext");
+                println!("│{:05}│{:^20}│{:^5}│{:^20}│{:^20}│",self.target, self.movement, self. laps, self.pnod, "Ext");
             }else{
-                println!("│{:05}│{:^20}│{:^5}│{:^11}│{:^10}│",self.target, self.movement, self. laps, self.pnod, 0.001 / self.error() * self.target as f32 / 3.14159265359);
+                println!("│{:05}│{:^20}│{:^5}│{:^20}│{:^20}│",self.target, self.movement, self. laps, self.pnod, 0.001 / self.error() * self.target as f64 / 3.14159265359);
             }
         }
         fn sort(original : Vec<PrintData>) -> Vec<PrintData>{
@@ -433,6 +443,10 @@ struct PrintData
                         output.insert(i, test);
                         break;
                     }
+                    else if test.error() == data.error() && test.complexity < data.complexity{
+                        output.insert(i, test);
+                        break;
+                    }
                     else if i == output.len()-1
                     {
                         output.push(test);
@@ -442,8 +456,8 @@ struct PrintData
             }
             return  output;
         }
-        fn error(&self) -> f32{
-            return (self.target as f32 - self.pnod).abs();
+        fn error(&self) -> f64{
+            return (self.target as f64 - self.pnod).abs();
         }
     }
 
@@ -453,7 +467,7 @@ fn save_settings(settings : &Settings){
     fs::write("setup.ron", ronstring).expect("Failed to save setup");
 }
 
-fn no_loops_onx(divisions : u32, x : u32) -> bool{
+fn no_loops_onx(divisions : usize, x : usize) -> bool{
     let mut hold = divisions % x;
     if hold == 0{
         return false;
