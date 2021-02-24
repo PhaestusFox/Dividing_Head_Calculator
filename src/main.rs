@@ -353,7 +353,8 @@ fn find_dubble_hole_backward(divisions : usize, ratio : usize, hole_count : usiz
     if hole_count == sec_hole_count { //skip if holes are the same hole
         return None;
     }
-    //do not trust any of this
+    //be sceptical of this it is playing nice but is not as tested as the forward version and but is basicly a sine flip so should be fin
+    //there is a bug that is some how can end up with a big holes more then 1.99 x hole_count witch results in x/X where x is bigger then X but the math is correct just doesnt look as nice
     let step = ratio as f64 / divisions as f64 * x as f64;
     let mut full = (step - (1.0 / hole_count as f64) * x as f64).floor();
     let big_step = step - full;
